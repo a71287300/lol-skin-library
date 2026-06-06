@@ -235,6 +235,32 @@ app.get('/api/lcu/match/:gameId', async (req, res) => {
   }
 });
 
+// ==========================================
+// 6. LCU 單場時間軸 (Match Timeline)
+// ==========================================
+app.get('/api/lcu/match-timeline/:gameId', async (req, res) => {
+  if (!lcuCredentials) {
+    return res.json({ success: false, message: '未連接 League Client' });
+  }
+
+  try {
+    const gameId = req.params.gameId;
+    const timelineResp = await request({
+      method: 'GET',
+      url: `/lol-match-history/v1/game-timelines/${gameId}`
+    }, lcuCredentials);
+    
+    if (timelineResp.status !== 200) {
+      return res.json({ success: false, message: `找不到時間軸資料 (HTTP ${timelineResp.status})` });
+    }
+    
+    const timelineData = await timelineResp.json();
+    res.json({ success: true, data: timelineData });
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+});
+
 const server = app.listen(0, '127.0.0.1', async () => {
   const activePort = server.address().port;
   console.log(`\n========================================`);

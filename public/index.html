@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <!-- Header -->
@@ -153,6 +154,39 @@
       <div class="modal-content match-modal-content" onclick="event.stopPropagation()">
         <button class="modal-close" onclick="closeMatchModalDirect()">&times;</button>
         <h3 id="match-modal-title" class="modal-title">對戰詳細數據</h3>
+        <div id="match-modal-chart-container" class="chart-container hidden">
+          <canvas id="match-timeline-chart"></canvas>
+        </div>
+        
+        <div style="text-align: center; margin-bottom: 10px;">
+          <button class="toggle-adv-stats" onclick="toggleAdvancedStats()">📊 顯示進階資訊</button>
+        </div>
+        
+        <div id="adv-stats-container" class="adv-stats-container hidden">
+          <div class="adv-stats-team blue-team-stats">
+            <h4>藍方進階數據</h4>
+            <table class="adv-stats-table" id="adv-stats-blue">
+              <thead>
+                <tr>
+                  <th>玩家</th><th>承傷</th><th>減傷</th><th>治療隊友</th><th>總治療</th><th>控場時間</th><th>對塔傷害</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="adv-stats-team red-team-stats">
+            <h4>紅方進階數據</h4>
+            <table class="adv-stats-table" id="adv-stats-red">
+              <thead>
+                <tr>
+                  <th>玩家</th><th>承傷</th><th>減傷</th><th>治療隊友</th><th>總治療</th><th>控場時間</th><th>對塔傷害</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <div id="match-modal-scoreboard" class="match-scoreboard">
           <div style="text-align:center; padding: 20px; color: var(--grey-200);">讀取中...</div>
         </div>

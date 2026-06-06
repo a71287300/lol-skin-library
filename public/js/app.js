@@ -9,6 +9,7 @@ let currentFilter = 'all';
 let shoppingCart = [];
 let ddragonVersion = '16.11.1'; // fallback
 let runesMap = new Map();
+window.spellsMap = new Map();
 
 // ========================================
 // Connect & Fetch Data
@@ -64,6 +65,29 @@ async function connectAndFetch() {
               runesMap.set(rune.id, rune.icon);
             });
           });
+        });
+      }
+      
+      // Fetch Summoner Spells
+      const spellsResp = await fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json');
+      if (spellsResp.ok) {
+        const spellsData = await spellsResp.json();
+        spellsData.forEach(spell => {
+          let iconUrl = spell.iconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
+          window.spellsMap.set(spell.id, iconUrl);
+        });
+      }
+
+      // Fetch Arena Augments
+      window.augmentsMap = new Map();
+      const augmentsResp = await fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_tw/v1/cherry-augments.json');
+      if (augmentsResp.ok) {
+        const augmentsData = await augmentsResp.json();
+        augmentsData.forEach(aug => {
+          if (aug.augmentSmallIconPath) {
+            let iconUrl = aug.augmentSmallIconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
+            window.augmentsMap.set(aug.id, { icon: iconUrl, name: aug.nameTRA || '增幅裝置' });
+          }
         });
       }
     } catch (e) {
@@ -224,6 +248,115 @@ function closeMatchModalDirect() {
   document.getElementById('match-modal').classList.add('hidden');
 }
 
+let matchChart = null;
+
+function drawTimelineChart(timelineData) {
+  const container = document.getElementById('match-modal-chart-container');
+  if (!timelineData || !timelineData.frames) {
+    container.classList.add('hidden');
+    return;
+  }
+  
+  container.classList.remove('hidden');
+  const ctx = document.getElementById('match-timeline-chart').getContext('2d');
+  
+  if (matchChart) {
+    matchChart.destroy();
+  }
+
+  const labels = [];
+  const dataPoints = [];
+
+  timelineData.frames.forEach((frame, index) => {
+    labels.push(index + '分');
+    let blueGold = 0;
+    let redGold = 0;
+    
+    // Sum gold for participants 1-5 (Blue) and 6-10 (Red)
+    for (const [id, participantFrame] of Object.entries(frame.participantFrames)) {
+      if (parseInt(id) <= 5) blueGold += participantFrame.totalGold;
+      else redGold += participantFrame.totalGold;
+    }
+    
+    dataPoints.push(blueGold - redGold);
+  });
+
+  matchChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '經濟差距 (藍方 - 紅方)',
+        data: dataPoints,
+        fill: true,
+        backgroundColor: (context) => {
+          const chart = context.chart;
+          const {ctx, chartArea} = chart;
+          if (!chartArea) return null;
+          
+          const yScale = chart.scales.y;
+          const yZero = yScale.getPixelForValue(0);
+          
+          const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          
+          // Blue above zero, Red below zero
+          const zeroRatio = Math.max(0, Math.min(1, (yZero - chartArea.top) / (chartArea.bottom - chartArea.top)));
+          
+          gradient.addColorStop(0, 'rgba(54, 162, 235, 0.5)'); // Blue top
+          if (zeroRatio > 0 && zeroRatio < 1) {
+            gradient.addColorStop(zeroRatio, 'rgba(54, 162, 235, 0.1)');
+            gradient.addColorStop(zeroRatio, 'rgba(255, 99, 132, 0.1)');
+          }
+          gradient.addColorStop(1, 'rgba(255, 99, 132, 0.5)'); // Red bottom
+          
+          return gradient;
+        },
+        borderColor: (context) => {
+          return context.raw >= 0 ? 'rgb(54, 162, 235)' : 'rgb(255, 99, 132)';
+        },
+        segment: {
+          borderColor: ctx => ctx.p1.parsed.y >= 0 ? 'rgb(54, 162, 235)' : 'rgb(255, 99, 132)'
+        },
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        intersect: false,
+        mode: 'index',
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const val = context.raw;
+              if (val > 0) return '藍方領先 ' + val + ' 金錢';
+              else if (val < 0) return '紅方領先 ' + Math.abs(val) + ' 金錢';
+              return '經濟平手';
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          grid: { color: 'rgba(255, 255, 255, 0.1)' },
+          ticks: { color: '#a0a0a0' }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: '#a0a0a0', maxTicksLimit: 10 }
+        }
+      }
+    }
+  });
+}
+
 function closeMatchModal(e) {
   if (e.target.id === 'match-modal') {
     closeMatchModalDirect();
@@ -244,7 +377,36 @@ async function showMatchDetails(gameId) {
 
     const data = result.data;
     
-    // Group participants by teamId and Calculate MVP/Feeder
+    // Fetch Timeline Data for Chart
+    let timelineData = null;
+    try {
+      const tlResp = await fetch(`/api/lcu/match-timeline/${gameId}`);
+      const tlResult = await tlResp.json();
+      if (tlResult.success) timelineData = tlResult.data;
+    } catch (e) {
+      console.error('Failed to fetch timeline', e);
+    }
+    
+    // Draw Chart
+    drawTimelineChart(timelineData);
+
+    // 1. Calculate Team Totals
+    const teamTotals = {
+      100: { kills: 0, damage: 0, gold: 0, tanking: 0 },
+      200: { kills: 0, damage: 0, gold: 0, tanking: 0 }
+    };
+
+    data.participants.forEach(p => {
+      const stats = p.stats;
+      if (teamTotals[p.teamId]) {
+        teamTotals[p.teamId].kills += stats.kills;
+        teamTotals[p.teamId].damage += stats.totalDamageDealtToChampions;
+        teamTotals[p.teamId].gold += stats.goldEarned;
+        teamTotals[p.teamId].tanking += (stats.totalDamageTaken || 0) + (stats.damageSelfMitigated || 0);
+      }
+    });
+
+    // 2. Group participants by teamId and Calculate Advanced OP Score
     const teams = {};
     let winningTeamId = null;
     let scores = [];
@@ -258,10 +420,46 @@ async function showMatchDetails(gameId) {
       
       teams[p.teamId].push(p);
       
-      // MVP Score Calculation
+      // Advanced Score Calculation
       const stats = p.stats;
+      const team = teamTotals[p.teamId] || { kills: 1, damage: 1, gold: 1, tanking: 1 };
+      
       const kdaRatio = (stats.kills + stats.assists) / Math.max(stats.deaths, 1);
-      const score = (kdaRatio * 100) + (stats.totalDamageDealtToChampions / 1000) + (stats.visionScore || 0);
+      const kp = team.kills > 0 ? (stats.kills + stats.assists) / team.kills : 0;
+      const dmgShare = team.damage > 0 ? stats.totalDamageDealtToChampions / team.damage : 0;
+      const dmgPerGold = stats.goldEarned > 0 ? stats.totalDamageDealtToChampions / stats.goldEarned : 0;
+      
+      // Capped KDA to prevent "KDA players" from getting infinite points
+      const cappedKdaRatio = Math.min(kdaRatio, 6);
+      
+      let score = 0;
+      score += kp * 45; // Kill Participation (Up to 45)
+      score += cappedKdaRatio * 4; // KDA (Max 24)
+      score += dmgShare * 30; // Damage share (Up to ~15)
+      score += Math.min(Math.max(0, dmgPerGold - 1), 3) * 10; // Bonus for efficient dmg/gold, max 30 points
+      
+      // Support & Tank stats
+      score += (stats.visionScore || 0) * 0.3; // Vision
+      score += ((stats.totalHealsOnTeammates || 0) / 1000) * 2.0; // Healing allies is highly rewarded
+      score += ((stats.timeCCingOthers || 0) / 10) * 1.5; // CCing enemies
+      
+      // Tanking stats: damage taken + mitigated
+      const tanking = (stats.totalDamageTaken || 0) + (stats.damageSelfMitigated || 0);
+      const teamTanking = teamTotals[p.teamId] ? teamTotals[p.teamId].tanking : (tanking || 1);
+      const tankingShare = teamTanking > 0 ? tanking / teamTanking : 0;
+      score += tankingShare * 20; // Absorbing damage for team, up to 20 points
+      
+      score += ((stats.damageDealtToObjectives || 0) / 1000) * 1.0; // Objectives
+      score -= stats.deaths * 2; // Penalize feeding
+      
+      // Multi-kill bonuses (huge impact)
+      if (stats.pentaKills > 0) score += 20;
+      else if (stats.quadraKills > 0) score += 10;
+      else if (stats.tripleKills > 0) score += 5;
+      
+      p.kp = kp;
+      p.dmgPerGold = dmgPerGold;
+
       scores.push({ id: p.participantId, teamId: p.teamId, score, win: stats.win, kdaRatio });
       if (stats.win) winningTeamId = p.teamId;
     });
@@ -269,8 +467,8 @@ async function showMatchDetails(gameId) {
     const winningPlayers = scores.filter(s => s.teamId === winningTeamId).sort((a, b) => b.score - a.score);
     const losingPlayers = scores.filter(s => s.teamId !== winningTeamId).sort((a, b) => a.score - b.score);
     const mvpId = winningPlayers.length > 0 ? winningPlayers[0].id : null;
-    const feederId = losingPlayers.length > 0 && losingPlayers[0].kdaRatio <= 1.2 ? losingPlayers[0].id : null;
-    const svpId = losingPlayers.length > 0 ? losingPlayers[losingPlayers.length - 1].id : null;
+    const feederId = losingPlayers.length > 0 && losingPlayers[losingPlayers.length - 1].kdaRatio <= 1.5 ? losingPlayers[losingPlayers.length - 1].id : null;
+    const svpId = losingPlayers.length > 0 ? losingPlayers[0].id : null;
 
     // Find max damage for the damage bar
     let maxDamage = 1;
@@ -281,6 +479,9 @@ async function showMatchDetails(gameId) {
     });
 
     let html = '';
+    let advStatsBlueHtml = '';
+    let advStatsRedHtml = '';
+    
     for (const teamId in teams) {
       const players = teams[teamId];
       // Team header name
@@ -327,16 +528,65 @@ async function showMatchDetails(gameId) {
         if (subIcon) perkHtml += `<img src="${subIcon}" class="perk-icon perk-sub" title="副系" />`;
         perkHtml += '</div>';
         
+        // Spells
+        const spell1Url = window.spellsMap.get(p.spell1Id) || '';
+        const spell2Url = window.spellsMap.get(p.spell2Id) || '';
+        let spellHtml = '<div class="player-spells">';
+        if (spell1Url) spellHtml += `<img src="${spell1Url}" class="spell-icon" />`;
+        if (spell2Url) spellHtml += `<img src="${spell2Url}" class="spell-icon" />`;
+        spellHtml += '</div>';
+
+        // Level
+        const champLevel = stats.champLevel || 1;
+
+        // Extra Stats
+        const cs = (stats.totalMinionsKilled || 0) + (stats.neutralMinionsKilled || 0);
+        const gold = stats.goldEarned ? (stats.goldEarned / 1000).toFixed(1) + 'k' : '0';
+        const vision = stats.visionScore || 0;
+        const kpPercent = p.kp ? (p.kp * 100).toFixed(0) + '%' : '0%';
+        const dmgPerGoldPercent = p.dmgPerGold ? (p.dmgPerGold * 100).toFixed(0) + '%' : '0%';
+        
+        let extraStatsHtml = `
+          <div class="player-stats-extra">
+            <div title="參團率 (Kill Participation)"><span class="stat-icon">🤝</span> ${kpPercent}</div>
+            <div title="傷金比 (Damage per Gold)"><span class="stat-icon">📈</span> ${dmgPerGoldPercent}</div>
+            <div title="吃兵數 (CS)"><span class="stat-icon">⚔️</span> ${cs}</div>
+            <div title="視野分數"><span class="stat-icon">👁️</span> ${vision}</div>
+          </div>
+        `;
+
         // Badges
         let badgesHtml = '';
         if (p.participantId === mvpId) badgesHtml += '<span class="performance-badge badge-mvp">MVP</span>';
         if (p.participantId === svpId && svpId !== feederId) badgesHtml += '<span class="performance-badge badge-mvp" style="border-color: #8da1b9; color: #8da1b9;">SVP</span>';
         if (p.participantId === feederId) badgesHtml += '<span class="performance-badge badge-feeder">戰犯</span>';
+        
+        // Multi-kills
+        if (stats.pentaKills > 0) badgesHtml += '<span class="performance-badge badge-penta">Penta Kill</span>';
+        else if (stats.quadraKills > 0) badgesHtml += '<span class="performance-badge badge-quadra">Quadra Kill</span>';
+        else if (stats.tripleKills > 0) badgesHtml += '<span class="performance-badge badge-multi">Triple Kill</span>';
+        else if (stats.doubleKills > 0) badgesHtml += '<span class="performance-badge badge-multi">Double Kill</span>';
+
+        // Arena Augments
+        let augmentsHtml = '<div class="augments-container">';
+        const augs = [stats.playerAugment1, stats.playerAugment2, stats.playerAugment3, stats.playerAugment4];
+        augs.forEach(augId => {
+          if (augId && augId > 0 && window.augmentsMap && window.augmentsMap.has(augId)) {
+            const augData = window.augmentsMap.get(augId);
+            augmentsHtml += `<img src="${augData.icon}" class="augment-icon" title="${augData.name}" />`;
+          }
+        });
+        augmentsHtml += '</div>';
 
         html += `
           <div class="scoreboard-player">
-            <img src="${champImg}" class="player-champ" onerror="this.style.display='none'">
+            <div class="player-champ-wrapper">
+              <img src="${champImg}" class="player-champ" onerror="this.style.display='none'">
+              <span class="player-level">${champLevel}</span>
+            </div>
+            ${spellHtml}
             ${perkHtml}
+            ${augmentsHtml}
             <div class="player-identity">
               <div class="player-name">${summonerName} ${badgesHtml}</div>
               <div class="player-kda">${kda}</div>
@@ -345,17 +595,50 @@ async function showMatchDetails(gameId) {
               <div>${dmg.toLocaleString()}</div>
               <div class="damage-bar"><div class="damage-fill" style="width: ${dmgPct}%"></div></div>
             </div>
+            ${extraStatsHtml}
             ${itemsHtml}
           </div>
         `;
+        
+        // Advanced Stats Row
+        const advRow = `
+          <tr>
+            <td style="display: flex; align-items: center; gap: 8px;">
+              <img src="${champImg}" style="width:24px; height:24px; border-radius:50%;">
+              <span>${summonerName}</span>
+            </td>
+            <td>${(stats.totalDamageTaken || 0).toLocaleString()}</td>
+            <td>${(stats.damageSelfMitigated || 0).toLocaleString()}</td>
+            <td>${(stats.totalHealsOnTeammates || 0).toLocaleString()}</td>
+            <td>${(stats.totalHeal || 0).toLocaleString()}</td>
+            <td>${stats.timeCCingOthers || 0}s</td>
+            <td>${(stats.damageDealtToObjectives || 0).toLocaleString()}</td>
+          </tr>
+        `;
+        if (teamId === '100') advStatsBlueHtml += advRow;
+        else advStatsRedHtml += advRow;
       });
       html += `</div>`; // end team
     }
 
     scoreboard.innerHTML = html;
+    document.querySelector('#adv-stats-blue tbody').innerHTML = advStatsBlueHtml;
+    document.querySelector('#adv-stats-red tbody').innerHTML = advStatsRedHtml;
+    
+    // Reset toggle
+    document.getElementById('adv-stats-container').classList.add('hidden');
 
   } catch (err) {
     scoreboard.innerHTML = `<div style="text-align:center; padding: 20px; color: var(--red);">❌ 載入失敗：${err.message}</div>`;
+  }
+}
+
+function toggleAdvancedStats() {
+  const container = document.getElementById('adv-stats-container');
+  if (container.classList.contains('hidden')) {
+    container.classList.remove('hidden');
+  } else {
+    container.classList.add('hidden');
   }
 }
 
