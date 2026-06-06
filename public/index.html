@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="LOL Skin Library - 查看你的英雄聯盟造型收藏進度">
+  <title>LOL Skin Library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header id="app-header">
+    <div class="header-inner">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h1>LOL Skin Library</h1>
+      </div>
+      <div class="header-right">
+        <span id="mode-badge" class="mode-badge"></span>
+        <div id="summoner-badge" class="summoner-badge hidden">
+          <img id="summoner-icon" class="summoner-icon" alt="icon" />
+          <div class="summoner-info">
+            <span id="summoner-name" class="summoner-name"></span>
+            <span id="summoner-level" class="summoner-level"></span>
+          </div>
+        </div>
+        <button class="cart-btn" onclick="openCart()">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
+          </svg>
+          <span id="cart-badge" class="cart-badge hidden">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main id="app-main" class="main-content">
+    <!-- Connect Section -->
+    <section id="connect-section" class="connect-section">
+      <div class="connect-card">
+        <div class="hero">
+          <div class="hero-icon">✨</div>
+          <h2>檢視您的英雄聯盟造型收藏</h2>
+          <p class="connect-desc">程式將會自動尋找您的英雄聯盟並開始讀取</p>
+        </div>
+
+        <div class="action-card">
+          <div class="card-header">
+            <h3>連接 League Client</h3>
+          </div>
+
+          <!-- Connect Button -->
+          <button id="btn-connect" class="btn-primary" onclick="connectAndFetch()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span id="btn-connect-text">開始讀取造型資料</span>
+          </button>
+
+          
+          <div id="connect-status" class="connect-status"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cart Modal -->
+    <div id="cart-modal" class="modal hidden" onclick="closeCart(event)">
+      <div class="modal-content cart-modal-content">
+        <button class="modal-close" onclick="closeCartDirect()">×</button>
+        <div class="modal-title">🛒 購物車清單</div>
+        <div id="cart-skins-list" class="cart-skins-list"></div>
+        <div class="cart-footer">
+          <div class="cart-total">
+            總計: <span id="cart-total-rp">0</span> RP
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <section id="loading-section" class="loading-section hidden">
+      <div class="loader">
+        <div class="loader-ring"></div>
+        <div class="loader-ring"></div>
+        <div class="loader-ring"></div>
+      </div>
+      <p id="loading-text" class="loading-text">正在連接 League Client...</p>
+    </section>
+
+    <!-- App Tabs -->
+    <nav id="app-tabs" class="app-tabs hidden">
+      <button class="tab-btn active" onclick="switchTab('skins')">造型圖鑑</button>
+      <button class="tab-btn" onclick="switchTab('profile')">戰績總覽</button>
+    </nav>
+
+    <!-- Results Section (Skins) -->
+    <section id="results-section" class="results-section hidden">
+      <div id="stats-grid" class="stats-grid"></div>
+      <div class="filter-bar">
+        <div class="filter-group">
+          <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部角色</button>
+          <button class="filter-btn" data-filter="no-skins" onclick="setFilter('no-skins')">完全沒有造型</button>
+          <button class="filter-btn" data-filter="partial" onclick="setFilter('partial')">部分擁有</button>
+          <button class="filter-btn" data-filter="complete" onclick="setFilter('complete')">已完成收集</button>
+          <button class="filter-btn sale-btn" data-filter="sale" onclick="setFilter('sale')">🔥 特價中</button>
+        </div>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input type="text" id="search-input" placeholder="搜尋角色名稱..." oninput="filterChampions()"/>
+        </div>
+      </div>
+      <div id="champions-grid" class="champions-grid"></div>
+
+      <!-- Skin Detail Modal -->
+      <div id="skin-modal" class="modal hidden" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+          <button class="modal-close" onclick="closeModalDirect()">&times;</button>
+          <h3 id="modal-champ-name" class="modal-title"></h3>
+          <div class="modal-stats">
+            <span id="modal-owned" class="modal-stat"></span>
+            <div id="modal-progress-bar" class="modal-progress-bar"><div class="modal-progress-fill"></div></div>
+          </div>
+          <div id="modal-skins-list" class="modal-skins-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Profile Section (Ranked & Matches) -->
+    <section id="profile-section" class="profile-section hidden">
+      <!-- Ranked Stats -->
+      <div id="ranked-grid" class="ranked-grid"></div>
+      
+      <!-- Match History -->
+      <div class="match-history-header">
+        <h3>近期對戰紀錄</h3>
+      </div>
+      <div id="match-list" class="match-list"></div>
+    </section>
+
+    <!-- Match Detail Modal -->
+    <div id="match-modal" class="modal hidden" onclick="closeMatchModal(event)">
+      <div class="modal-content match-modal-content" onclick="event.stopPropagation()">
+        <button class="modal-close" onclick="closeMatchModalDirect()">&times;</button>
+        <h3 id="match-modal-title" class="modal-title">對戰詳細數據</h3>
+        <div id="match-modal-scoreboard" class="match-scoreboard">
+          <div style="text-align:center; padding: 20px; color: var(--grey-200);">讀取中...</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "lol-skin-library",
+  "version": "1.0.0",
+  "description": "LOL Skin Library - View your missing skins collection",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build.cjs"
+  },
+  "keywords": [
+    "league-of-legends",
+    "skins",
+    "lcu-api"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "league-connect": "^5.5.0",
+    "open": "^11.0.0"
+  },
+  "devDependencies": {
+    "caxa": "^3.0.1",
+    "fs-extra": "^11.3.5",
+    "jimp": "^0.16.1",
+    "png-to-ico": "^3.0.1",
+    "puppeteer-core": "^25.1.0",
+    "rcedit": "^5.0.2"
+  }
+}
