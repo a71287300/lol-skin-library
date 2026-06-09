@@ -71,7 +71,7 @@ function updateCountdownDisplay() {
 
 async function refreshMatchHistory() {
   try {
-    const profileResp = await fetch('/api/lcu/profile');
+    const profileResp = await fetch('/api/lcu/profile', { cache: 'no-store' });
     const profileResult = await profileResp.json();
     if (profileResult.success) {
       profileData = profileResult.data;
@@ -102,8 +102,8 @@ async function connectAndFetch() {
 
     updateLoadingText('正在讀取遊戲資料...');
     const [skinsResult, profileResult] = await Promise.all([
-      fetch('/api/lcu/skins').then(r => r.json()),
-      fetch('/api/lcu/profile').then(r => r.json()).catch(() => ({ success: false }))
+      fetch('/api/lcu/skins', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/lcu/profile', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ success: false }))
     ]);
 
     if (!skinsResult.success) throw new Error(skinsResult.message);
