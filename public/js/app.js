@@ -11,9 +11,76 @@ let ddragonVersion = '16.11.1'; // fallback
 let runesMap = new Map();
 window.spellsMap = new Map();
 
+// Auto-Refresh State
+let autoRefreshEnabled = false;
+let autoRefreshInterval = null;
+let autoRefreshCountdown = null;
+let autoRefreshSeconds = 5; // Refresh every 5 seconds
+let countdownRemaining = 0;
+
 // ========================================
-// Connect & Fetch Data
+// Auto-Refresh Logic
 // ========================================
+
+function toggleAutoRefresh(enabled) {
+  autoRefreshEnabled = enabled;
+  if (enabled) {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh(); // Clear any existing timers
+  countdownRemaining = autoRefreshSeconds;
+  updateCountdownDisplay();
+  
+  const countdownEl = document.getElementById('auto-refresh-countdown');
+  if (countdownEl) countdownEl.classList.add('active');
+  
+  autoRefreshCountdown = setInterval(() => {
+    countdownRemaining--;
+    updateCountdownDisplay();
+    
+    if (countdownRemaining <= 0) {
+      refreshMatchHistory();
+      countdownRemaining = autoRefreshSeconds;
+    }
+  }, 1000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshCountdown) {
+    clearInterval(autoRefreshCountdown);
+    autoRefreshCountdown = null;
+  }
+  const countdownEl = document.getElementById('auto-refresh-countdown');
+  if (countdownEl) {
+    countdownEl.classList.remove('active');
+    countdownEl.textContent = '';
+  }
+}
+
+function updateCountdownDisplay() {
+  const countdownEl = document.getElementById('auto-refresh-countdown');
+  if (countdownEl) {
+    countdownEl.textContent = `${countdownRemaining}s`;
+  }
+}
+
+async function refreshMatchHistory() {
+  try {
+    const profileResp = await fetch('/api/lcu/profile');
+    const profileResult = await profileResp.json();
+    if (profileResult.success) {
+      profileData = profileResult.data;
+      renderProfile();
+    }
+  } catch (e) {
+    console.error('Auto-refresh failed:', e);
+  }
+}
 
 async function connectAndFetch() {
   const btn = document.getElementById('btn-connect');
@@ -33,66 +100,20 @@ async function connectAndFetch() {
     const connectResult = await connectResp.json();
     if (!connectResult.success) throw new Error(connectResult.message);
 
-    updateLoadingText('正在讀取造型資料...');
-    const skinsResp = await fetch('/api/lcu/skins');
-    const skinsResult = await skinsResp.json();
+    updateLoadingText('正在讀取遊戲資料...');
+    const [skinsResult, profileResult] = await Promise.all([
+      fetch('/api/lcu/skins').then(r => r.json()),
+      fetch('/api/lcu/profile').then(r => r.json()).catch(() => ({ success: false }))
+    ]);
+
     if (!skinsResult.success) throw new Error(skinsResult.message);
 
-    updateLoadingText('正在讀取戰績與積分資料...');
-    try {
-      const profileResp = await fetch('/api/lcu/profile');
-      const profileResult = await profileResp.json();
-      if (profileResult.success) {
-        profileData = profileResult.data;
-      }
-    } catch (e) {
-      console.error('Failed to fetch profile:', e);
+    if (profileResult && profileResult.success) {
+      profileData = profileResult.data;
     }
 
-    try {
-      const vResp = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
-      const versions = await vResp.json();
-      if (versions && versions.length > 0) ddragonVersion = versions[0];
-      
-      // Fetch Runes
-      const runesResp = await fetch(`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/data/zh_TW/runesReforged.json`);
-      if (runesResp.ok) {
-        const runesData = await runesResp.json();
-        runesData.forEach(tree => {
-          runesMap.set(tree.id, tree.icon);
-          tree.slots.forEach(slot => {
-            slot.runes.forEach(rune => {
-              runesMap.set(rune.id, rune.icon);
-            });
-          });
-        });
-      }
-      
-      // Fetch Summoner Spells
-      const spellsResp = await fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json');
-      if (spellsResp.ok) {
-        const spellsData = await spellsResp.json();
-        spellsData.forEach(spell => {
-          let iconUrl = spell.iconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
-          window.spellsMap.set(spell.id, iconUrl);
-        });
-      }
-
-      // Fetch Arena Augments
-      window.augmentsMap = new Map();
-      const augmentsResp = await fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_tw/v1/cherry-augments.json');
-      if (augmentsResp.ok) {
-        const augmentsData = await augmentsResp.json();
-        augmentsData.forEach(aug => {
-          if (aug.augmentSmallIconPath) {
-            let iconUrl = aug.augmentSmallIconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
-            window.augmentsMap.set(aug.id, { icon: iconUrl, name: aug.nameTRA || '增幅裝置' });
-          }
-        });
-      }
-    } catch (e) {
-      console.error('Failed to fetch ddragon data:', e);
-    }
+    // Start background fetching of static assets so we don't block the UI
+    fetchStaticAssetsAsync();
 
     // The server already processed the data into the final appData format
     appData = skinsResult.data;
@@ -111,6 +132,56 @@ async function connectAndFetch() {
     const status = document.getElementById('connect-status');
     status.className = 'connect-status error';
     status.textContent = `❌ ${error.message}`;
+  }
+}
+
+async function fetchStaticAssetsAsync() {
+  try {
+    const vResp = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+    const versions = await vResp.json();
+    if (versions && versions.length > 0) ddragonVersion = versions[0];
+    
+    // We can fetch these in parallel now
+    await Promise.all([
+      // Fetch Runes
+      fetch(`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/data/zh_TW/runesReforged.json`)
+        .then(r => r.json())
+        .then(runesData => {
+          runesData.forEach(tree => {
+            runesMap.set(tree.id, tree.icon);
+            tree.slots.forEach(slot => {
+              slot.runes.forEach(rune => {
+                runesMap.set(rune.id, rune.icon);
+              });
+            });
+          });
+        }).catch(e => console.error('Runes fetch failed', e)),
+        
+      // Fetch Summoner Spells
+      fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/summoner-spells.json')
+        .then(r => r.json())
+        .then(spellsData => {
+          spellsData.forEach(spell => {
+            let iconUrl = spell.iconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
+            window.spellsMap.set(spell.id, iconUrl);
+          });
+        }).catch(e => console.error('Spells fetch failed', e)),
+
+      // Fetch Arena Augments
+      fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_tw/v1/cherry-augments.json')
+        .then(r => r.json())
+        .then(augmentsData => {
+          window.augmentsMap = new Map();
+          augmentsData.forEach(aug => {
+            if (aug.augmentSmallIconPath) {
+              let iconUrl = aug.augmentSmallIconPath.toLowerCase().replace('/lol-game-data/assets/', 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/');
+              window.augmentsMap.set(aug.id, { icon: iconUrl, name: aug.nameTRA || '增幅裝置' });
+            }
+          });
+        }).catch(e => console.error('Augments fetch failed', e))
+    ]);
+  } catch (e) {
+    console.error('Failed to fetch ddragon data:', e);
   }
 }
 
@@ -708,7 +779,8 @@ function renderChampions() {
 
   if (search) {
     champions = champions.filter(c =>
-      c.championName && c.championName.toLowerCase().includes(search)
+      (c.championName && c.championName.toLowerCase().includes(search)) ||
+      (c.skins && c.skins.some(s => s.name && s.name.toLowerCase().includes(search)))
     );
   }
 

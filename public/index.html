@@ -118,7 +118,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
-          <input type="text" id="search-input" placeholder="搜尋角色名稱..." oninput="filterChampions()"/>
+          <input type="text" id="search-input" placeholder="搜尋角色或造型名稱..." oninput="filterChampions()"/>
         </div>
       </div>
       <div id="champions-grid" class="champions-grid"></div>
@@ -145,6 +145,14 @@
       <!-- Match History -->
       <div class="match-history-header">
         <h3>近期對戰紀錄</h3>
+        <div class="auto-refresh-control" id="auto-refresh-control">
+          <span class="auto-refresh-label">自動刷新</span>
+          <label class="toggle-switch" for="auto-refresh-toggle">
+            <input type="checkbox" id="auto-refresh-toggle" onchange="toggleAutoRefresh(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="auto-refresh-countdown" id="auto-refresh-countdown"></span>
+        </div>
       </div>
       <div id="match-list" class="match-list"></div>
     </section>

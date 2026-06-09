@@ -37,54 +37,50 @@ app.get('/api/lcu/skins', async (req, res) => {
   }
 
   try {
-    // 1. Get current summoner
-    const summonerResp = await request({ method: 'GET', url: '/lol-summoner/v1/current-summoner' }, lcuCredentials);
+    // 1. Parallelize initial independent requests
+    const [summonerResp, champsResp, catalogResp, cdResp] = await Promise.all([
+      request({ method: 'GET', url: '/lol-summoner/v1/current-summoner' }, lcuCredentials),
+      request({ method: 'GET', url: '/lol-champions/v1/owned-champions-minimal' }, lcuCredentials),
+      request({ method: 'GET', url: '/lol-store/v1/catalog' }, lcuCredentials),
+      fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/skins.json').catch(() => ({ ok: false }))
+    ]);
+
     if (!summonerResp.ok) throw new Error(`獲取召喚師失敗: ${summonerResp.status}`);
     const summoner = await summonerResp.json();
 
-    // 2. Get champion minimal (for aliases)
-    const champsResp = await request({ method: 'GET', url: '/lol-champions/v1/owned-champions-minimal' }, lcuCredentials);
-    let champsMap = {};
-    if (champsResp.ok) {
-      const champs = await champsResp.json();
-      for (const c of champs) champsMap[c.id] = c.alias;
-    }
+    // 2. Fetch skins (depends on summonerId), while parsing others concurrently
+    const skinsPromise = request({
+      method: 'GET',
+      url: `/lol-champions/v1/inventories/${summoner.summonerId}/skins-minimal`
+    }, lcuCredentials).then(res => {
+      if (!res.ok) throw new Error(`獲取造型失敗: ${res.status}`);
+      return res.json();
+    });
 
-    // 3. Get store catalog (for prices and availability)
-    const catalogResp = await request({ method: 'GET', url: '/lol-store/v1/catalog' }, lcuCredentials);
+    const [champs, catalog, cdSkinsData, skins] = await Promise.all([
+      champsResp.ok ? champsResp.json() : Promise.resolve([]),
+      catalogResp.ok ? catalogResp.json() : Promise.resolve([]),
+      cdResp.ok ? cdResp.json() : Promise.resolve({}),
+      skinsPromise
+    ]);
+
+    let champsMap = {};
+    for (const c of champs) champsMap[c.id] = c.alias;
+
     let catalogMap = {};
-    if (catalogResp.ok) {
-      const catalog = await catalogResp.json();
-      for (const item of catalog) {
-        if (item.inventoryType === 'CHAMPION_SKIN') {
-          catalogMap[item.itemId] = {
-            active: item.active,
-            price: item.prices && item.prices.length > 0 ? item.prices[0].cost : null,
-            currency: item.prices && item.prices.length > 0 ? item.prices[0].currency : null,
-            sale: item.sale || null,
-            originalPrice: item.originalPrice || null
-          };
-        }
+    for (const item of catalog) {
+      if (item.inventoryType === 'CHAMPION_SKIN') {
+        catalogMap[item.itemId] = {
+          active: item.active,
+          price: item.prices && item.prices.length > 0 ? item.prices[0].cost : null,
+          currency: item.prices && item.prices.length > 0 ? item.prices[0].currency : null,
+          sale: item.sale || null,
+          originalPrice: item.originalPrice || null
+        };
       }
     }
 
-    // 4. Get skins
-    const skinsResp = await request({
-      method: 'GET',
-      url: `/lol-champions/v1/inventories/${summoner.summonerId}/skins-minimal`
-    }, lcuCredentials);
-
-    if (!skinsResp.ok) throw new Error(`獲取造型失敗: ${skinsResp.status}`);
-    const skins = await skinsResp.json();
-
-    // 4.5 Fetch CDragon skins for rarity and legacy data
-    let cdSkins = {};
-    try {
-      const cdResp = await fetch('https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/skins.json');
-      if (cdResp.ok) cdSkins = await cdResp.json();
-    } catch (e) {
-      console.error('Failed to fetch CDragon skins:', e);
-    }
+    let cdSkins = cdSkinsData;
 
     // Process data: group by champion
     const champions = {};
@@ -177,20 +173,16 @@ app.get('/api/lcu/profile', async (req, res) => {
   }
 
   try {
-    // 1. Fetch Ranked Stats
-    const rankedResp = await request({
-      method: 'GET',
-      url: '/lol-ranked/v1/current-ranked-stats'
-    }, lcuCredentials);
-    const rankedData = await rankedResp.json();
-
-    // 2. Fetch Match History
-    const matchResp = await request({
-      method: 'GET',
-      url: '/lol-match-history/v1/products/lol/current-summoner/matches'
-    }, lcuCredentials);
-    let matchData = await matchResp.json();
+    const [rankedResp, matchResp] = await Promise.all([
+      request({ method: 'GET', url: '/lol-ranked/v1/current-ranked-stats' }, lcuCredentials),
+      request({ method: 'GET', url: '/lol-match-history/v1/products/lol/current-summoner/matches' }, lcuCredentials)
+    ]);
     
+    const [rankedData, matchData] = await Promise.all([
+      rankedResp.ok ? rankedResp.json() : Promise.resolve({}),
+      matchResp.ok ? matchResp.json() : Promise.resolve({})
+    ]);
+
     // We only need the last 20 matches (already paginated by default usually, but we slice just in case)
     let games = [];
     if (matchData && matchData.games && matchData.games.games) {
@@ -261,23 +253,33 @@ app.get('/api/lcu/match-timeline/:gameId', async (req, res) => {
   }
 });
 
-const server = app.listen(0, '127.0.0.1', async () => {
-  const activePort = server.address().port;
-  console.log(`\n========================================`);
-  console.log(`🚀 LOL Skin Library 已成功啟動！`);
-  console.log(`========================================\n`);
-  console.log(`📖 正在自動為您開啟瀏覽器: http://127.0.0.1:${activePort}\n`);
-  
-  try {
-    await open(`http://127.0.0.1:${activePort}`);
-  } catch (err) {
-    console.log(`⚠️ 無法自動開啟瀏覽器，請手動複製以上網址在瀏覽器中貼上。`);
-  }
-  
-  console.log(`\n(如果您想關閉程式，請直接關閉這個黑色的命令視窗)\n`);
+export function startServer() {
+  return new Promise((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => {
+      const activePort = server.address().port;
+      resolve(activePort);
+    });
 
-  // Prevent instant exit if something goes wrong later
-  process.on('uncaughtException', (err) => {
-    console.error('發生未預期錯誤:', err);
+    process.on('uncaughtException', (err) => {
+      console.error('發生未預期錯誤:', err);
+    });
   });
-});
+}
+
+// Check if run directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startServer().then(async (activePort) => {
+    console.log(`\n========================================`);
+    console.log(`🚀 LOL Skin Library 已成功啟動！`);
+    console.log(`========================================\n`);
+    console.log(`📖 正在自動為您開啟瀏覽器: http://127.0.0.1:${activePort}\n`);
+    
+    try {
+      await open(`http://127.0.0.1:${activePort}`);
+    } catch (err) {
+      console.log(`⚠️ 無法自動開啟瀏覽器，請手動複製以上網址在瀏覽器中貼上。`);
+    }
+    
+    console.log(`\n(如果您想關閉程式，請直接關閉這個黑色的命令視窗)\n`);
+  });
+}
